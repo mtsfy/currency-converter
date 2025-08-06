@@ -20,31 +20,25 @@ var (
 	quote      string
 	quoteValue float64
 	inputValue string
+	currencies CurrenciesData
 )
 
-type Rate map[string]float64
+type CurrenciesData map[string]string
 
-type Data struct {
+type RatesData struct {
 	Rates map[string]float64 `json:"rates"`
 }
 
 func print() {
 	p := message.NewPrinter(language.English)
 
-	currencies := make(map[string]string)
-	currencies["USD"] = "$"
-	currencies["GBP"] = "£"
-	currencies["EUR"] = "€"
-	currencies["JPY"] = "¥"
-	currencies["ETB"] = "Br"
-
 	if base == quote {
 		fmt.Println("Whoa! You picked the same currency for conversion. No conversion needed.")
-		p.Printf("%s%.2f (%s) converts to %s%.2f (%s)\n", currencies[base], baseValue, base, currencies[quote], baseValue, quote)
+		p.Printf("%.2f %s equals %.2f %s\n", baseValue, currencies[base], baseValue, currencies[base])
 		return
 	}
 
-	p.Printf("%s%.2f (%s) converts to %s%.2f (%s)\n", currencies[base], baseValue, base, currencies[quote], quoteValue, quote)
+	p.Printf("%.2f %s equals %.2f %s\n", baseValue, currencies[base], quoteValue, currencies[quote])
 }
 
 func convert() {
@@ -67,25 +61,25 @@ func convert() {
 
 	defer res.Body.Close()
 
-	var d Data
+	var rd RatesData
 	body, err := io.ReadAll(res.Body)
 	if err != nil {
 		panic(err)
 	}
 
-	err = json.Unmarshal(body, &d)
+	err = json.Unmarshal(body, &rd)
 	if err != nil {
 		panic(err)
 	}
 
 	baseRate := 1.0
 	if base != "USD" {
-		baseRate = d.Rates[base]
+		baseRate = rd.Rates[base]
 	}
 
 	quoteRate := 1.0
 	if quote != "USD" {
-		quoteRate = d.Rates[quote]
+		quoteRate = rd.Rates[quote]
 	}
 
 	baseValue, err = strconv.ParseFloat(inputValue, 64)
@@ -96,27 +90,49 @@ func convert() {
 	quoteValue = (quoteRate / baseRate) * baseValue
 }
 
+func getCurrencies() {
+	f, err := os.ReadFile("currencies.json")
+	if err != nil {
+		panic(err)
+	}
+	err = json.Unmarshal(f, &currencies)
+	if err != nil {
+		panic(err)
+	}
+}
+
 func main() {
+	getCurrencies()
+
+	var options []huh.Option[string]
+	for code, name := range currencies {
+		display := fmt.Sprintf("%s (%s)", code, name)
+		options = append(options, huh.NewOption(display, code))
+	}
 
 	form := huh.NewForm(
 		huh.NewGroup(
-			huh.NewSelect[string]().Title("What is your base currency?").Options(
-				huh.NewOption("$ USD", "USD"),
-				huh.NewOption("£ GBP", "GBP"),
-				huh.NewOption("€ EUR", "EUR"),
-				huh.NewOption("¥ JPY", "JPY"),
-				huh.NewOption("Br BIRR", "ETB"),
-			).Value(&base),
-			huh.NewSelect[string]().Title("What do you want to convert to?").Options(
-				huh.NewOption("$ USD", "USD"),
-				huh.NewOption("£ GBP", "GBP"),
-				huh.NewOption("€ EUR", "EUR"),
-				huh.NewOption("¥ JPY", "JPY"),
-				huh.NewOption("Br BIRR", "ETB"),
-			).Value(&quote),
-			huh.NewInput().Title("How much do you want to convert").Value(&inputValue),
+			huh.NewSelect[string]().
+				Title("Base Currency").
+				Description("💡 Press / to search (e.g. 'dollar', 'eur', 'yen')").
+				Options(options...).
+				Height(12).
+				Value(&base),
 		),
-	)
+		huh.NewGroup(
+			huh.NewSelect[string]().
+				Title("Target Currency").
+				Description("💡 Press / to search").
+				Options(options...).
+				Height(12).
+				Value(&quote),
+		),
+		huh.NewGroup(
+			huh.NewInput().
+				Title("How much do you want to convert?").
+				Placeholder("Enter amount (e.g. 100)").
+				Value(&inputValue),
+		))
 
 	err := form.Run()
 	if err != nil {
